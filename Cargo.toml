@@ -1,0 +1,24 @@
+[package]
+name = "wheel-reader"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+anyhow = "1.0.93"
+async_zip = { version = "0.0.17", features = ["full"] }
+clap = { version = "4.5.21", features = ["derive"] }
+futures-util = "0.3.31"
+lazy_static = "1.5.0"
+opendal = { version = "0.50.2", features = [
+    "layers-tracing",
+    "services-http",
+    "services-monoiofs",
+] }
+regex = "1.11.1"
+tokio = { version = "1.41.1", features = ["macros", "rt", "rt-multi-thread"] }
+tracing = "0.1.40"
+tracing-subscriber = { version = "0.3.18", features = [
+    "env-filter",
+    "registry",
+] }
+url = "2.5.4"
