@@ -4,7 +4,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use futures_util::AsyncReadExt as _;
+use futures_util::{future::try_join_all, AsyncReadExt as _};
 use lazy_static::lazy_static;
 use opendal::services::{Http, Monoiofs};
 use url::Url;
@@ -30,58 +30,68 @@ impl FromStr for WheelUrl {
     }
 }
 
-trait UrlReadable {
-    async fn reader(&self) -> Result<opendal::Reader>;
+enum Service {
+    Httpx(opendal::services::Http),
+    File(opendal::services::Monoiofs),
 }
 
-fn build_operator<T: opendal::Builder>(builder: T) -> opendal::Result<opendal::Operator> {
-    use opendal::layers::*;
+impl Service {
+    pub(crate) fn build(self) -> opendal::Result<opendal::Operator> {
+        match self {
+            Self::Httpx(builder) => Self::build_operator(builder),
+            Self::File(builder) => Self::build_operator(builder),
+        }
+    }
 
-    Ok(opendal::Operator::new(builder)?
-        .layer(LoggingLayer::default())
-        .layer(TracingLayer)
-        .finish())
+    fn build_operator<T: opendal::Builder>(builder: T) -> opendal::Result<opendal::Operator> {
+        use opendal::layers::*;
+
+        Ok(opendal::Operator::new(builder)?
+            .layer(LoggingLayer::default())
+            .layer(TracingLayer)
+            .finish())
+    }
+}
+
+trait UrlReadable {
+    fn service(&self) -> Service;
+    fn path(&self) -> Result<&str>;
 }
 
 impl UrlReadable for WheelUrl {
-    async fn reader(&self) -> Result<opendal::Reader> {
-        let (op, path) = match self {
+    fn service(&self) -> Service {
+        match self {
             WheelUrl::Httpx(url) => {
                 let endpoint = format!("{}://{}", url.scheme(), url.domain().unwrap());
-                (
-                    build_operator(Http::default().endpoint(&endpoint))?,
-                    url.path(),
-                )
+                Service::Httpx(Http::default().endpoint(&endpoint))
             }
-            WheelUrl::File(path) => (
-                build_operator(Monoiofs::default().root("/"))?,
-                path.to_str().context("path is not valid utf-8")?,
-            ),
-        };
-        Ok(op.reader_with(path).await?)
+            WheelUrl::File(_) => Service::File(Monoiofs::default().root("/")),
+        }
+    }
+
+    fn path(&self) -> Result<&str> {
+        match self {
+            WheelUrl::Httpx(url) => Ok(url.path()),
+            WheelUrl::File(path) => path.to_str().context("path is not valid utf-8"),
+        }
     }
 }
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
 struct Args {
-    /// URL or local file path to open
-    url: WheelUrl,
+    /// URLs or local file paths to open
+    urls: Vec<WheelUrl>,
 }
 
 lazy_static! {
     static ref RE_METADATA: regex::Regex = regex::Regex::new(r".*/METADATA$").unwrap();
 }
 
-#[monoio::main]
-async fn main() -> Result<()> {
-    let args = Args::parse();
-
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
-        .init();
-
-    let zip_file_reader = args.url.reader().await?.into_futures_async_read(..).await?;
+async fn run(url: WheelUrl) -> Result<()> {
+    let op = url.service().build()?;
+    let reader = op.reader_with(url.path()?).await?;
+    let zip_file_reader = reader.into_futures_async_read(..).await?;
     let mut zip_file = ZipFileReader::new(zip_file_reader)
         .await
         .context("failed to open zip file")?;
@@ -97,5 +107,18 @@ async fn main() -> Result<()> {
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).await?;
     println!("{}", String::from_utf8_lossy(&buf));
+    Ok(())
+}
+
+#[monoio::main]
+async fn main() -> Result<()> {
+    let args = Args::parse();
+
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
+        .init();
+
+    let futs = args.urls.into_iter().map(run).collect::<Vec<_>>();
+    try_join_all(futs).await?;
     Ok(())
 }
