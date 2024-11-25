@@ -73,7 +73,7 @@ lazy_static! {
     static ref RE_METADATA: regex::Regex = regex::Regex::new(r".*/METADATA$").unwrap();
 }
 
-#[tokio::main]
+#[monoio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
