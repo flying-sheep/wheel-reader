@@ -110,7 +110,7 @@ async fn run(url: WheelUrl) -> Result<()> {
     Ok(())
 }
 
-#[monoio::main]
+#[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
