@@ -4,7 +4,7 @@ use std::str::FromStr;
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use futures_util::{future::try_join_all, AsyncReadExt as _};
+use futures_util::{stream::FuturesUnordered, AsyncReadExt as _, TryStreamExt as _};
 use lazy_static::lazy_static;
 use opendal::services::{Http, Monoiofs};
 use url::Url;
@@ -88,7 +88,7 @@ lazy_static! {
     static ref RE_METADATA: regex::Regex = regex::Regex::new(r".*/METADATA$").unwrap();
 }
 
-async fn run(url: WheelUrl) -> Result<()> {
+async fn run(url: WheelUrl) -> Result<String> {
     let op = url.service().build()?;
     let reader = op.reader_with(url.path()?).await?;
     let zip_file_reader = reader.into_futures_async_read(..).await?;
@@ -106,8 +106,7 @@ async fn run(url: WheelUrl) -> Result<()> {
     let mut reader = zip_file.reader_with_entry(entry).await?;
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).await?;
-    println!("{}", String::from_utf8_lossy(&buf));
-    Ok(())
+    Ok(String::from_utf8(buf)?)
 }
 
 #[tokio::main]
@@ -118,7 +117,9 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
 
-    let futs = args.urls.into_iter().map(run).collect::<Vec<_>>();
-    try_join_all(futs).await?;
+    let mut as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
+    while let Some(x) = as_finished.try_next().await? {
+        println!("{}", x);
+    }
     Ok(())
 }
