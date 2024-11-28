@@ -1,5 +1,5 @@
+use std::path::PathBuf;
 use std::str::FromStr;
-use std::{path::PathBuf, pin::pin};
 
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
@@ -130,12 +130,15 @@ async fn main() -> Result<()> {
         .init();
 
     let as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
-
-    let s = as_finished.map(|r| r.expect("TODO: handle error"));
-    let mut stdout = pin!(tokio::io::stdout().compat_write());
-    let mut s = destream_json::encode_map(s.map(|(a, b)| (a.to_string(), b)))
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
-        .into_async_read();
-    futures_util::io::copy(&mut s, &mut stdout).await?;
+    let items = as_finished
+        .map(|r| r.expect("TODO: handle error"))
+        .map(|(a, b)| (a.to_string(), b));
+    futures_util::io::copy(
+        &mut destream_json::encode_map(items)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .into_async_read(),
+        &mut tokio::io::stdout().compat_write(),
+    )
+    .await?;
     Ok(())
 }
