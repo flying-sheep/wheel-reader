@@ -1,18 +1,35 @@
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use futures_util::{future::try_join_all, AsyncReadExt as _};
+use futures_util::{
+    stream::FuturesUnordered, AsyncReadExt as _, StreamExt as _, TryStreamExt as _,
+};
 use lazy_static::lazy_static;
 use opendal::services::{Http, Monoiofs};
+use tokio_util::compat::TokioAsyncWriteCompatExt as _;
 use url::Url;
 
-#[derive(Debug, Clone)]
-enum WheelUrl {
-    Httpx(Url),
-    File(PathBuf),
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum WheelUrlType {
+    Httpx,
+    File,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct WheelUrl {
+    url_type: WheelUrlType,
+    url: Url,
+}
+
+impl std::fmt::Display for WheelUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.url_type {
+            WheelUrlType::Httpx => write!(f, "{}", self.url),
+            WheelUrlType::File => write!(f, "{}", self.url.path()),
+        }
+    }
 }
 
 impl FromStr for WheelUrl {
@@ -20,13 +37,17 @@ impl FromStr for WheelUrl {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let Ok(url) = Url::parse(s) else {
-            return Ok(WheelUrl::File(PathBuf::from(s)));
+            return Ok(WheelUrl {
+                url_type: WheelUrlType::File,
+                url: Url::from_file_path(s).map_err(|_| anyhow::anyhow!("invalid path: {s}"))?,
+            });
         };
-        match url.scheme() {
-            "https" | "http" => Ok(WheelUrl::Httpx(url)),
-            "file" => Ok(WheelUrl::File(PathBuf::from(url.path()))),
-            _ => Err(anyhow::anyhow!("unknown scheme: {s}")),
-        }
+        let url_type = match url.scheme() {
+            "https" | "http" => WheelUrlType::Httpx,
+            "file" => WheelUrlType::File,
+            _ => anyhow::bail!("unknown scheme: {s}"),
+        };
+        Ok(WheelUrl { url_type, url })
     }
 }
 
@@ -53,27 +74,25 @@ impl Service {
     }
 }
 
-trait UrlReadable {
-    fn service(&self) -> Service;
-    fn path(&self) -> Result<&str>;
-}
-
-impl UrlReadable for WheelUrl {
+impl WheelUrl {
     fn service(&self) -> Service {
-        match self {
-            WheelUrl::Httpx(url) => {
-                let endpoint = format!("{}://{}", url.scheme(), url.domain().unwrap());
+        match self.url_type {
+            WheelUrlType::Httpx => {
+                let endpoint = format!("{}://{}", self.url.scheme(), self.url.domain().unwrap());
                 Service::Httpx(Http::default().endpoint(&endpoint))
             }
-            WheelUrl::File(_) => Service::File(Monoiofs::default().root("/")),
+            WheelUrlType::File => Service::File(Monoiofs::default().root("/")),
         }
     }
 
-    fn path(&self) -> Result<&str> {
-        match self {
-            WheelUrl::Httpx(url) => Ok(url.path()),
-            WheelUrl::File(path) => path.to_str().context("path is not valid utf-8"),
-        }
+    fn path(&self) -> &str {
+        self.url.path()
+    }
+
+    fn file_name(&self) -> Option<String> {
+        let path = PathBuf::from(self.url.path());
+        let file_name: &str = path.file_name()?.try_into().unwrap(); // we just made it from a &str
+        Some(file_name.to_owned())
     }
 }
 
@@ -88,9 +107,9 @@ lazy_static! {
     static ref RE_METADATA: regex::Regex = regex::Regex::new(r".*/METADATA$").unwrap();
 }
 
-async fn run(url: WheelUrl) -> Result<()> {
+async fn run(url: WheelUrl) -> Result<(WheelUrl, String)> {
     let op = url.service().build()?;
-    let reader = op.reader_with(url.path()?).await?;
+    let reader = op.reader_with(url.path()).await?;
     let zip_file_reader = reader.into_futures_async_read(..).await?;
     let mut zip_file = ZipFileReader::new(zip_file_reader)
         .await
@@ -106,8 +125,7 @@ async fn run(url: WheelUrl) -> Result<()> {
     let mut reader = zip_file.reader_with_entry(entry).await?;
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).await?;
-    println!("{}", String::from_utf8_lossy(&buf));
-    Ok(())
+    Ok((url, String::from_utf8(buf)?))
 }
 
 #[tokio::main]
@@ -118,7 +136,17 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
 
-    let futs = args.urls.into_iter().map(run).collect::<Vec<_>>();
-    try_join_all(futs).await?;
+    let as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
+    let items = as_finished.map(|r| {
+        let (url, json) = r.expect("TODO: handle error");
+        (url.file_name().unwrap_or_else(|| url.to_string()), json)
+    });
+    futures_util::io::copy(
+        &mut destream_json::encode_map(items)
+            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+            .into_async_read(),
+        &mut tokio::io::stdout().compat_write(),
+    )
+    .await?;
     Ok(())
 }
