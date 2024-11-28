@@ -1,10 +1,10 @@
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
 
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
 use futures_util::{
-    future, stream::FuturesUnordered, AsyncReadExt as _, StreamExt as _, TryStreamExt as _,
+    stream::FuturesUnordered, AsyncReadExt as _, StreamExt as _, TryStreamExt as _,
 };
 use lazy_static::lazy_static;
 use opendal::services::{Http, Monoiofs};
@@ -90,10 +90,7 @@ impl WheelUrl {
     }
 
     fn file_name(&self) -> Result<String> {
-        let path = self
-            .url
-            .to_file_path()
-            .map_err(|_| anyhow::anyhow!("no file path"))?;
+        let path = PathBuf::from(self.url.path());
         let file_name: &str = path
             .file_name()
             .context("no file name")?
