@@ -89,14 +89,10 @@ impl WheelUrl {
         self.url.path()
     }
 
-    fn file_name(&self) -> Result<String> {
+    fn file_name(&self) -> Option<String> {
         let path = PathBuf::from(self.url.path());
-        let file_name: &str = path
-            .file_name()
-            .context("no file name")?
-            .try_into()
-            .context("invalid file name")?;
-        Ok(file_name.to_owned())
+        let file_name: &str = path.file_name()?.try_into().unwrap(); // we just made it from a &str
+        Some(file_name.to_owned())
     }
 }
 
@@ -143,7 +139,7 @@ async fn main() -> Result<()> {
     let as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
     let items = as_finished.map(|r| {
         let (url, json) = r.expect("TODO: handle error");
-        (url.file_name().expect("no file name"), json)
+        (url.file_name().unwrap_or_else(|| url.to_string()), json)
     });
     futures_util::io::copy(
         &mut destream_json::encode_map(items)
