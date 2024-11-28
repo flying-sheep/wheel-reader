@@ -1,18 +1,30 @@
-use std::path::PathBuf;
 use std::str::FromStr;
+use std::{path::PathBuf, pin::pin};
 
 use anyhow::{Context, Result};
 use async_zip::base::read::seek::ZipFileReader;
 use clap::Parser;
-use futures_util::{stream::FuturesUnordered, AsyncReadExt as _, TryStreamExt as _};
+use futures_util::{
+    stream::FuturesUnordered, AsyncReadExt as _, StreamExt as _, TryStreamExt as _,
+};
 use lazy_static::lazy_static;
 use opendal::services::{Http, Monoiofs};
+use tokio_util::compat::TokioAsyncWriteCompatExt as _;
 use url::Url;
 
 #[derive(Debug, Clone)]
 enum WheelUrl {
     Httpx(Url),
     File(PathBuf),
+}
+
+impl std::fmt::Display for WheelUrl {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            WheelUrl::Httpx(url) => write!(f, "{url}"),
+            WheelUrl::File(path) => write!(f, "{}", path.display()),
+        }
+    }
 }
 
 impl FromStr for WheelUrl {
@@ -88,7 +100,7 @@ lazy_static! {
     static ref RE_METADATA: regex::Regex = regex::Regex::new(r".*/METADATA$").unwrap();
 }
 
-async fn run(url: WheelUrl) -> Result<String> {
+async fn run(url: WheelUrl) -> Result<(WheelUrl, String)> {
     let op = url.service().build()?;
     let reader = op.reader_with(url.path()?).await?;
     let zip_file_reader = reader.into_futures_async_read(..).await?;
@@ -106,7 +118,7 @@ async fn run(url: WheelUrl) -> Result<String> {
     let mut reader = zip_file.reader_with_entry(entry).await?;
     let mut buf = Vec::new();
     reader.read_to_end(&mut buf).await?;
-    Ok(String::from_utf8(buf)?)
+    Ok((url, String::from_utf8(buf)?))
 }
 
 #[tokio::main]
@@ -117,9 +129,13 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
 
-    let mut as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
-    while let Some(x) = as_finished.try_next().await? {
-        println!("{}", x);
-    }
+    let as_finished: FuturesUnordered<_> = args.urls.into_iter().map(run).collect();
+
+    let s = as_finished.map(|r| r.expect("TODO: handle error"));
+    let mut stdout = pin!(tokio::io::stdout().compat_write());
+    let mut s = destream_json::encode_map(s.map(|(a, b)| (a.to_string(), b)))
+        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
+        .into_async_read();
+    futures_util::io::copy(&mut s, &mut stdout).await?;
     Ok(())
 }

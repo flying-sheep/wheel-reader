@@ -7,6 +7,7 @@ edition = "2021"
 anyhow = "1.0.93"
 async_zip = { version = "0.0.17", features = ["full"] }
 clap = { version = "4.5.21", features = ["derive"] }
+destream_json = "0.13.0"
 futures-util = "0.3.31"
 lazy_static = "1.5.0"
 opendal = { version = "0.50.2", features = [
@@ -15,7 +16,8 @@ opendal = { version = "0.50.2", features = [
     "services-monoiofs",
 ] }
 regex = "1.11.1"
-tokio = { version = "1.41.1", features = ["macros", "rt", "rt-multi-thread"] }
+tokio = { version = "1.41.1", features = ["io-std", "macros", "rt", "rt-multi-thread"] }
+tokio-util = "0.7.12"
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = [
     "env-filter",
