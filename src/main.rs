@@ -1,9 +1,9 @@
 use anyhow::Result;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt as _, TryStreamExt as _};
-use tokio_util::compat::TokioAsyncWriteCompatExt as _;
 
 mod reader;
+mod rt;
 
 use reader::{Services, WheelUrl};
 
@@ -13,7 +13,7 @@ struct Args {
     urls: Vec<WheelUrl>,
 }
 
-#[tokio::main]
+#[crate::rt::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -38,7 +38,7 @@ async fn main() -> Result<()> {
         &mut destream_json::encode_map(items)
             .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))
             .into_async_read(),
-        &mut tokio::io::stdout().compat_write(),
+        &mut crate::rt::io::stdout(),
     )
     .await?;
     Ok(())
