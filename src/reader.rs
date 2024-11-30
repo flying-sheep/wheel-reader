@@ -116,17 +116,6 @@ pub struct Services {
 }
 
 impl Services {
-    pub fn new<'a, I>(urls: I) -> Result<Self>
-    where
-        I: IntoIterator<Item = &'a WheelUrl>,
-    {
-        let services = urls
-            .into_iter()
-            .map(|u| Ok(((u.url_type, u.endpoint().to_string()), u.service().build()?)))
-            .collect::<Result<_>>()?;
-        Ok(Self { services })
-    }
-
     pub fn operator(&mut self, url: &WheelUrl) -> &opendal::Operator {
         self.services
             .entry((url.url_type, url.endpoint().to_string()))

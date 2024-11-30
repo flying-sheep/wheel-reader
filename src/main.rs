@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
         .with_env_filter(tracing_subscriber::filter::EnvFilter::from_default_env())
         .init();
 
-    let mut services = Services::new(&args.urls)?;
+    let mut services = Services::default();
     let as_finished: FuturesUnordered<_> = args
         .urls
         .into_iter()
