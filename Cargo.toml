@@ -8,8 +8,11 @@ anyhow = "1.0.93"
 async_zip = { version = "0.0.17", features = ["full"] }
 clap = { version = "4.5.21", features = ["derive"] }
 destream_json = "0.13.0"
+futures = "0.3.31"
 futures-util = "0.3.31"
+http = { version = "1.1.0", optional = true }
 lazy_static = "1.5.0"
+monoio = { version = "0.2.4", optional = true }
 opendal = { version = "0.50.2", features = [
     "layers-tracing",
     "services-http",
@@ -27,10 +30,12 @@ url = "2.5.4"
 
 [features]
 tokio = [
+    "dep:tokio",
     "tokio/io-std",
     "tokio/macros",
     "tokio/rt",
     "tokio/rt-multi-thread",
     "tokio-util",
 ]
-default = ["tokio"]
+monoio = ["dep:monoio", "dep:http"]
+default = ["monoio"]
