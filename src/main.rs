@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Parser;
-use futures_util::{stream::FuturesUnordered, StreamExt as _, TryStreamExt as _};
+use futures_util::{StreamExt as _, TryStreamExt as _, stream::FuturesUnordered};
 
 mod reader;
 mod rt;

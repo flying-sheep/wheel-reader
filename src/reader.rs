@@ -131,9 +131,9 @@ impl Services {
         let entry = zip_file
             .file()
             .entries()
-            .into_iter()
+            .iter()
             .enumerate()
-            .flat_map(|(i, e)| e.filename().as_str().ok().and_then(|s| Some((i, s))))
+            .flat_map(|(i, e)| e.filename().as_str().ok().map(|s| (i, s)))
             .find_map(|(i, path)| RE_METADATA.is_match(path).then_some(i))
             .context("no METADATA file")?;
         let mut reader = zip_file.reader_with_entry(entry).await?;
