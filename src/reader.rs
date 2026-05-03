@@ -90,7 +90,14 @@ impl WheelUrl {
 
     fn service(&self) -> Service {
         match self.url_type {
-            WheelUrlType::Httpx => Service::Httpx(Http::default().endpoint(&self.endpoint())),
+            WheelUrlType::Httpx => {
+                let mut builder = Http::default().endpoint(&self.endpoint());
+                #[cfg(feature = "monoio")]
+                {
+                    builder = builder.http_client(crate::http_client::make_http_client())
+                }
+                Service::Httpx(builder)
+            }
             WheelUrlType::File => Service::File(Monoiofs::default().root(&self.endpoint())),
         }
     }
