@@ -2,6 +2,8 @@ use anyhow::Result;
 use clap::Parser;
 use futures_util::{StreamExt as _, TryStreamExt as _, stream::FuturesUnordered};
 
+#[cfg(feature = "monoio")]
+mod http_client;
 mod reader;
 mod rt;
 
